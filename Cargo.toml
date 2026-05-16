@@ -1,0 +1,19 @@
+[package]
+name = "devclean"
+version = "0.1.0"
+edition = "2021"
+description = "Scan a directory tree, find build/cache folders, and delete the ones you pick."
+license = "MIT"
+repository = "https://github.com/jaytuduri/devclean"
+keywords = ["cli", "clean", "disk", "node_modules", "cargo"]
+categories = ["command-line-utilities", "filesystem"]
+readme = "README.md"
+
+[dependencies]
+walkdir = "2"
+dialoguer = "0.11"
+indicatif = "0.17"
+
+[profile.release]
+strip = true
+lto = true
