@@ -3,7 +3,6 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
 use std::process::Command;
 use walkdir::WalkDir;
 
@@ -164,8 +163,33 @@ fn move_to_trash(path: &Path) -> io::Result<()> {
     }
 }
 
+fn update_self() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Fetching and installing the latest broom release...");
+
+    let status = Command::new("cargo")
+        .args(["install", "broom-cli", "--force"])
+        .status();
+
+    match status {
+        Ok(status) if status.success() => {
+            println!("broom updated successfully.");
+            Ok(())
+        }
+        Ok(status) => Err(format!("cargo install failed with status {status}").into()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Err(
+            "cargo was not found in PATH; install Rust from https://rustup.rs and try again".into(),
+        ),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
+
+    if args.get(1).is_some_and(|arg| arg == "update") {
+        return update_self();
+    }
+
     let root = args
         .get(1)
         .map(PathBuf::from)

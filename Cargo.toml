@@ -8,6 +8,7 @@ repository = "https://github.com/jaytuduri/broom-cli"
 keywords = ["cli", "clean", "disk", "node_modules", "cargo"]
 categories = ["command-line-utilities", "filesystem"]
 readme = "README.md"
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 
 [[bin]]
 name = "broom"

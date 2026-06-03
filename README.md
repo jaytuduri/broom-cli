@@ -45,6 +45,7 @@ cargo install --path .
 ```bash
 broom                  # scan current directory
 broom ~/projects       # scan a specific path
+broom update           # fetch and install the latest release
 ```
 
 Use `Space` to toggle folders, `Enter` to confirm the selection. You'll get one final confirmation before anything is moved to Trash.
