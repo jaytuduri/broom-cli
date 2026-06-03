@@ -1,13 +1,17 @@
 [package]
-name = "devclean"
+name = "broom-cli"
 version = "0.1.0"
 edition = "2021"
 description = "Scan a directory tree, find build/cache folders, and delete the ones you pick."
 license = "MIT"
-repository = "https://github.com/jaytuduri/devclean"
+repository = "https://github.com/jaytuduri/broom"
 keywords = ["cli", "clean", "disk", "node_modules", "cargo"]
 categories = ["command-line-utilities", "filesystem"]
 readme = "README.md"
+
+[[bin]]
+name = "broom"
+path = "src/main.rs"
 
 [dependencies]
 walkdir = "2"

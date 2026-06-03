@@ -1,4 +1,4 @@
-# devclean
+# broom
 
 A fast CLI tool that scans a directory tree for common build and cache folders, shows them sorted by size, and lets you pick which ones to delete.
 
@@ -16,27 +16,35 @@ Found 31 folder(s), 40.2 GB total.
 
 ## Install
 
-**From source (requires [Rust](https://rustup.rs)):**
+**From crates.io (requires [Rust](https://rustup.rs)):**
 
 ```bash
-cargo install --git https://github.com/jaytuduri/devclean
+cargo install broom-cli
+```
+
+This installs the `broom` command.
+
+**From source:**
+
+```bash
+cargo install --git https://github.com/jaytuduri/broom
 ```
 
 **Or clone and install locally:**
 
 ```bash
-git clone https://github.com/jaytuduri/devclean
-cd devclean
+git clone https://github.com/jaytuduri/broom
+cd broom
 cargo install --path .
 ```
 
-**Pre-built binaries** are available on the [Releases](https://github.com/jaytuduri/devclean/releases) page for macOS (Apple Silicon + Intel), Linux, and Windows.
+**Pre-built binaries** are available on the [Releases](https://github.com/jaytuduri/broom/releases) page for macOS (Apple Silicon + Intel), Linux, and Windows.
 
 ## Usage
 
 ```bash
-devclean                  # scan current directory
-devclean ~/projects       # scan a specific path
+broom                  # scan current directory
+broom ~/projects       # scan a specific path
 ```
 
 Use `Space` to toggle folders, `Enter` to confirm the selection. You'll get one final confirmation before anything is deleted.

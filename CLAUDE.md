@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 cargo build              # debug build
-cargo build --release    # optimized binary → target/release/devclean
+cargo build --release    # optimized binary → target/release/broom
 cargo run -- ~/projects  # run against a path
-cargo install --path .   # install to ~/.cargo/bin/devclean
+cargo install --path .   # install to ~/.cargo/bin/broom
 ```
 
 ## Architecture

@@ -12,9 +12,9 @@ const TARGETS: &[&str] = &[
     "dist",
     "build",
     "out",
-    ".next",        // Next.js
-    ".nuxt",        // Nuxt
-    ".svelte-kit",  // SvelteKit
+    ".next",       // Next.js
+    ".nuxt",       // Nuxt
+    ".svelte-kit", // SvelteKit
     ".turbo",
     ".vite",
     ".parcel-cache",
@@ -22,7 +22,7 @@ const TARGETS: &[&str] = &[
     "__pycache__",
     ".venv",
     "venv",
-    "DerivedData",  // Xcode
+    "DerivedData", // Xcode
 ];
 
 // Generic names only matched when a project marker exists in the parent directory.
