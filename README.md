@@ -27,18 +27,18 @@ This installs the `broom` command.
 **From source:**
 
 ```bash
-cargo install --git https://github.com/jaytuduri/broom
+cargo install --git https://github.com/jaytuduri/broom-cli
 ```
 
 **Or clone and install locally:**
 
 ```bash
-git clone https://github.com/jaytuduri/broom
-cd broom
+git clone https://github.com/jaytuduri/broom-cli
+cd broom-cli
 cargo install --path .
 ```
 
-**Pre-built binaries** are available on the [Releases](https://github.com/jaytuduri/broom/releases) page for macOS (Apple Silicon + Intel), Linux, and Windows.
+**Pre-built binaries** are available on the [Releases](https://github.com/jaytuduri/broom-cli/releases) page for macOS (Apple Silicon + Intel), Linux, and Windows.
 
 ## Usage
 
