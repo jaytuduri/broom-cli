@@ -1,9 +1,10 @@
 use dialoguer::{theme::ColorfulTheme, MultiSelect};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::Command;
 use walkdir::WalkDir;
 
 const TARGETS: &[&str] = &[
@@ -118,6 +119,51 @@ fn find_targets(root: &Path, spinner: &ProgressBar) -> Vec<Found> {
     found
 }
 
+fn move_to_trash(path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("osascript")
+            .arg("-e")
+            .arg("on run argv")
+            .arg("-e")
+            .arg("set itemPath to item 1 of argv")
+            .arg("-e")
+            .arg("tell application \"Finder\"")
+            .arg("-e")
+            .arg("delete (POSIX file itemPath as alias)")
+            .arg("-e")
+            .arg("end tell")
+            .arg("-e")
+            .arg("end run")
+            .arg(path.as_os_str())
+            .output()?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let message = stderr.trim();
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                if message.is_empty() {
+                    "Finder could not move the item to Trash".to_string()
+                } else {
+                    message.to_string()
+                },
+            ))
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Err(io::Error::new(
+            io::ErrorKind::Other,
+            "moving items to Trash through Finder is only available on macOS",
+        ))
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let root = args
@@ -171,7 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let freed: u64 = selected.iter().map(|&i| found[i].size).sum();
     print!(
-        "\nDelete {} folder(s), freeing {}? [y/N] ",
+        "\nMove {} folder(s) to Trash, freeing {}? [y/N] ",
         selected.len(),
         human(freed).trim()
     );
@@ -185,12 +231,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for &i in &selected {
         let path = &found[i].path;
-        match fs::remove_dir_all(path) {
+        match move_to_trash(path) {
             Ok(_) => println!("✓ {}", path.display()),
             Err(e) => eprintln!("✗ {}: {}", path.display(), e),
         }
     }
 
-    println!("\nDone. Freed ~{}", human(freed).trim());
+    println!("\nDone. Moved ~{} to Trash.", human(freed).trim());
     Ok(())
 }

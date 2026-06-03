@@ -21,16 +21,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            asset_name: devclean-linux-x86_64
+            asset_name: broom-linux-x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
-            asset_name: devclean-macos-arm64
+            asset_name: broom-macos-arm64
           - target: x86_64-apple-darwin
             os: macos-latest
-            asset_name: devclean-macos-x86_64
+            asset_name: broom-macos-x86_64
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            asset_name: devclean-windows-x86_64.exe
+            asset_name: broom-windows-x86_64.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -44,11 +44,11 @@ jobs:
 
       - name: Rename binary (Unix)
         if: matrix.os != 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/devclean ${{ matrix.asset_name }}
+        run: cp target/${{ matrix.target }}/release/broom ${{ matrix.asset_name }}
 
       - name: Rename binary (Windows)
         if: matrix.os == 'windows-latest'
-        run: cp target/${{ matrix.target }}/release/devclean.exe ${{ matrix.asset_name }}
+        run: cp target/${{ matrix.target }}/release/broom.exe ${{ matrix.asset_name }}
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2

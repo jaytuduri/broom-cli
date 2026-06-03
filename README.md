@@ -1,6 +1,6 @@
 # broom
 
-A fast CLI tool that scans a directory tree for common build and cache folders, shows them sorted by size, and lets you pick which ones to delete.
+A fast CLI tool that scans a directory tree for common build and cache folders, shows them sorted by size, and lets you pick which ones to move to Trash.
 
 ```
 ⠸ Scanning… 12 found
@@ -47,7 +47,9 @@ broom                  # scan current directory
 broom ~/projects       # scan a specific path
 ```
 
-Use `Space` to toggle folders, `Enter` to confirm the selection. You'll get one final confirmation before anything is deleted.
+Use `Space` to toggle folders, `Enter` to confirm the selection. You'll get one final confirmation before anything is moved to Trash.
+
+On macOS, broom asks Finder to move selected folders to the normal Trash instead of permanently deleting them.
 
 ## What it finds
 

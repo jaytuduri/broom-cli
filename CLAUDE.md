@@ -15,7 +15,7 @@ cargo install --path .   # install to ~/.cargo/bin/broom
 
 Single-file Rust CLI: `src/main.rs`.
 
-**Flow:** scan → sort by size → interactive checkbox → confirm → delete.
+**Flow:** scan → sort by size → interactive checkbox → confirm → move to Trash.
 
 Two tunable constants at the top of `main.rs`:
 - `TARGETS` — folder names to match and measure (e.g. `node_modules`, `target`, `.next`)
