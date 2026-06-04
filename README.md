@@ -50,7 +50,7 @@ broom update           # fetch and install the latest release
 
 Use `Space` to toggle folders, `Enter` to confirm the selection. You'll get one final confirmation before anything is moved to Trash.
 
-On macOS, broom asks Finder to move selected folders to the normal Trash instead of permanently deleting them.
+broom first tries to move selected folders to the normal Trash/Recycle Bin instead of permanently deleting them. On Linux, it uses `gio trash` or `trash-put` when available; on macOS it asks Finder; on Windows it uses PowerShell to send items to the Recycle Bin. If moving an item to Trash fails, broom asks before permanently deleting that item.
 
 ## What it finds
 
