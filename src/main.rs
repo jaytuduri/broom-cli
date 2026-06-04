@@ -1,6 +1,7 @@
-use dialoguer::{theme::ColorfulTheme, MultiSelect};
+use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -118,6 +119,16 @@ fn find_targets(root: &Path, spinner: &ProgressBar) -> Vec<Found> {
     found
 }
 
+fn trash_command_error(program: &str, output: std::process::Output, fallback: &str) -> io::Error {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = stderr.trim();
+    io::Error::other(if message.is_empty() {
+        fallback.to_string()
+    } else {
+        format!("{program} failed: {message}")
+    })
+}
+
 fn move_to_trash(path: &Path) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
@@ -140,27 +151,101 @@ fn move_to_trash(path: &Path) -> io::Result<()> {
         if output.status.success() {
             Ok(())
         } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let message = stderr.trim();
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                if message.is_empty() {
-                    "Finder could not move the item to Trash".to_string()
-                } else {
-                    message.to_string()
-                },
+            Err(trash_command_error(
+                "osascript",
+                output,
+                "Finder could not move the item to Trash",
             ))
         }
     }
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    {
+        let mut failures = Vec::new();
+
+        for (program, args) in [("gio", &["trash"][..]), ("trash-put", &[][..])] {
+            let output = Command::new(program)
+                .args(args)
+                .arg(path.as_os_str())
+                .output();
+
+            match output {
+                Ok(output) if output.status.success() => return Ok(()),
+                Ok(output) => failures.push(
+                    trash_command_error(
+                        program,
+                        output,
+                        &format!("{program} could not move the item to Trash"),
+                    )
+                    .to_string(),
+                ),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => failures.push(format!("{program} failed: {error}")),
+            }
+        }
+
+        if failures.is_empty() {
+            Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "could not find gio or trash-put; install GLib or trash-cli to move items to Trash",
+            ))
+        } else {
+            Err(io::Error::other(format!(
+                "could not move the item to Trash: {}",
+                failures.join("; ")
+            )))
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let command = if path.is_dir() {
+            "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($args[0], 'OnlyErrorDialogs', 'SendToRecycleBin')"
+        } else {
+            "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($args[0], 'OnlyErrorDialogs', 'SendToRecycleBin')"
+        };
+
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-Command", command])
+            .arg(path.as_os_str())
+            .output()?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(trash_command_error(
+                "powershell",
+                output,
+                "PowerShell could not move the item to Recycle Bin",
+            ))
+        }
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         let _ = path;
         Err(io::Error::new(
-            io::ErrorKind::Other,
-            "moving items to Trash through Finder is only available on macOS",
+            io::ErrorKind::Unsupported,
+            "moving items to Trash is not supported on this platform",
         ))
     }
+}
+
+fn permanently_delete(path: &Path) -> io::Result<()> {
+    if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    }
+}
+
+fn confirm_permanent_delete(path: &Path, error: &io::Error) -> io::Result<bool> {
+    eprintln!("✗ {}: {}", path.display(), error);
+    Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt("Move to Trash failed. Permanently delete this item instead?")
+        .default(false)
+        .interact()
+        .map_err(io::Error::other)
 }
 
 fn update_self() -> Result<(), Box<dyn std::error::Error>> {
@@ -207,7 +292,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut found = find_targets(&root, &spinner);
     spinner.finish_and_clear();
 
-    found.sort_by(|a, b| b.size.cmp(&a.size));
+    found.sort_by_key(|f| std::cmp::Reverse(f.size));
 
     if found.is_empty() {
         println!("Nothing to clean.");
@@ -253,14 +338,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    let mut trashed = 0;
+    let mut deleted = 0;
+    let mut failed = 0;
+    let mut cleaned = 0;
+
     for &i in &selected {
-        let path = &found[i].path;
+        let item = &found[i];
+        let path = &item.path;
         match move_to_trash(path) {
-            Ok(_) => println!("✓ {}", path.display()),
-            Err(e) => eprintln!("✗ {}: {}", path.display(), e),
+            Ok(_) => {
+                println!("✓ trashed {}", path.display());
+                trashed += 1;
+                cleaned += item.size;
+            }
+            Err(error) => {
+                if confirm_permanent_delete(path, &error)? {
+                    match permanently_delete(path) {
+                        Ok(_) => {
+                            println!("✓ permanently deleted {}", path.display());
+                            deleted += 1;
+                            cleaned += item.size;
+                        }
+                        Err(delete_error) => {
+                            eprintln!("✗ {}: {}", path.display(), delete_error);
+                            failed += 1;
+                        }
+                    }
+                } else {
+                    println!("Skipped {}", path.display());
+                    failed += 1;
+                }
+            }
         }
     }
 
-    println!("\nDone. Moved ~{} to Trash.", human(freed).trim());
+    println!(
+        "\nDone. Trashed {}, permanently deleted {}, skipped {}. Cleaned ~{}.",
+        trashed,
+        deleted,
+        failed,
+        human(cleaned).trim()
+    );
     Ok(())
 }
