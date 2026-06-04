@@ -1,4 +1,4 @@
-use dialoguer::{theme::ColorfulTheme, Confirm, MultiSelect};
+use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
 use std::fs;
@@ -42,9 +42,24 @@ const MARKERS: &[&str] = &[
 // Don't walk into these — saves time and avoids noise.
 const SKIP: &[&str] = &[".git", ".svn", ".hg", ".idea", ".vscode"];
 
-struct Found {
+#[derive(Clone, Copy)]
+enum Category {
+    Here,
+    Downloads,
+    Caches,
+}
+
+#[derive(Clone, Copy)]
+enum Risk {
+    ReviewOnly,
+}
+
+struct Candidate {
     path: PathBuf,
     size: u64,
+    label: String,
+    category: Category,
+    selected_by_default: bool,
 }
 
 fn dir_size(path: &Path) -> u64 {
@@ -55,6 +70,10 @@ fn dir_size(path: &Path) -> u64 {
         .filter(|m| m.is_file())
         .map(|m| m.len())
         .sum()
+}
+
+fn file_size(path: &Path) -> u64 {
+    path.metadata().map(|m| m.len()).unwrap_or(0)
 }
 
 fn has_marker(dir: &Path) -> bool {
@@ -76,7 +95,38 @@ fn human(bytes: u64) -> String {
     format!("{:>6.1} {:<2}", size, UNITS[unit])
 }
 
-fn find_targets(root: &Path, spinner: &ProgressBar) -> Vec<Found> {
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME").map(PathBuf::from)
+}
+
+fn downloads_dir() -> Option<PathBuf> {
+    home_dir().map(|home| home.join("Downloads"))
+}
+
+fn caches_dir() -> Option<PathBuf> {
+    home_dir().map(|home| home.join("Library").join("Caches"))
+}
+
+fn expand_tilde(input: &str) -> PathBuf {
+    if input == "~" {
+        return home_dir().unwrap_or_else(|| PathBuf::from(input));
+    }
+
+    if let Some(rest) = input.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+
+    PathBuf::from(input)
+}
+
+fn label_for(root: &Path, path: &Path, size: u64) -> String {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    format!("{}  {}", human(size), rel.display())
+}
+
+fn scan_here(root: &Path, spinner: &ProgressBar) -> Vec<Candidate> {
     let mut found = Vec::new();
     let mut walker = WalkDir::new(root).into_iter();
 
@@ -107,9 +157,12 @@ fn find_targets(root: &Path, spinner: &ProgressBar) -> Vec<Found> {
             }
 
             let size = dir_size(path);
-            found.push(Found {
+            found.push(Candidate {
                 path: path.to_path_buf(),
                 size,
+                label: label_for(root, path, size),
+                category: Category::Here,
+                selected_by_default: true,
             });
             spinner.set_message(format!("{} found", found.len()));
             walker.skip_current_dir();
@@ -117,6 +170,95 @@ fn find_targets(root: &Path, spinner: &ProgressBar) -> Vec<Found> {
     }
 
     found
+}
+
+fn is_download_candidate(path: &Path) -> Option<bool> {
+    let file_name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+
+    if file_name.ends_with(".dmg") || file_name.ends_with(".pkg") || file_name.ends_with(".mpkg") {
+        return Some(true);
+    }
+
+    if file_name.ends_with(".zip")
+        || file_name.ends_with(".tar.gz")
+        || file_name.ends_with(".tgz")
+        || file_name.ends_with(".rar")
+        || file_name.ends_with(".7z")
+    {
+        return Some(false);
+    }
+
+    None
+}
+
+fn scan_downloads(spinner: &ProgressBar) -> Vec<Candidate> {
+    let Some(root) = downloads_dir() else {
+        return Vec::new();
+    };
+
+    let mut found = Vec::new();
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(_) => return found,
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(selected_by_default) = is_download_candidate(&path) else {
+            continue;
+        };
+
+        let size = file_size(&path);
+        found.push(Candidate {
+            path: path.clone(),
+            size,
+            label: label_for(&root, &path, size),
+            category: Category::Downloads,
+            selected_by_default,
+        });
+        spinner.set_message(format!("{} found", found.len()));
+    }
+
+    found
+}
+
+fn scan_caches(spinner: &ProgressBar) -> Vec<Candidate> {
+    let Some(root) = caches_dir() else {
+        return Vec::new();
+    };
+
+    let mut found = Vec::new();
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(_) => return found,
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let size = dir_size(&path);
+        found.push(Candidate {
+            path: path.clone(),
+            size,
+            label: label_for(&root, &path, size),
+            category: Category::Caches,
+            selected_by_default: false,
+        });
+        spinner.set_message(format!("{} found", found.len()));
+    }
+
+    found
+}
+
+fn find_targets(root: &Path, spinner: &ProgressBar) -> Vec<Candidate> {
+    scan_here(root, spinner)
 }
 
 fn trash_command_error(program: &str, output: std::process::Output, fallback: &str) -> io::Error {
