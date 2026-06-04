@@ -1,8 +1,7 @@
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect, Select};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::env;
-use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use walkdir::WalkDir;
@@ -59,7 +58,27 @@ struct Candidate {
     size: u64,
     label: String,
     category: Category,
+    risk: Risk,
     selected_by_default: bool,
+}
+
+impl Candidate {
+    fn new(
+        root: &Path,
+        path: PathBuf,
+        size: u64,
+        category: Category,
+        selected_by_default: bool,
+    ) -> Self {
+        Self {
+            label: label_for(root, &path, size),
+            path,
+            size,
+            category,
+            risk: Risk::ReviewOnly,
+            selected_by_default,
+        }
+    }
 }
 
 fn dir_size(path: &Path) -> u64 {
@@ -157,13 +176,13 @@ fn scan_here(root: &Path, spinner: &ProgressBar) -> Vec<Candidate> {
             }
 
             let size = dir_size(path);
-            found.push(Candidate {
-                path: path.to_path_buf(),
+            found.push(Candidate::new(
+                root,
+                path.to_path_buf(),
                 size,
-                label: label_for(root, path, size),
-                category: Category::Here,
-                selected_by_default: true,
-            });
+                Category::Here,
+                true,
+            ));
             spinner.set_message(format!("{} found", found.len()));
             walker.skip_current_dir();
         }
@@ -213,13 +232,13 @@ fn scan_downloads(spinner: &ProgressBar) -> Vec<Candidate> {
         };
 
         let size = file_size(&path);
-        found.push(Candidate {
-            path: path.clone(),
+        found.push(Candidate::new(
+            &root,
+            path,
             size,
-            label: label_for(&root, &path, size),
-            category: Category::Downloads,
+            Category::Downloads,
             selected_by_default,
-        });
+        ));
         spinner.set_message(format!("{} found", found.len()));
     }
 
@@ -244,21 +263,11 @@ fn scan_caches(spinner: &ProgressBar) -> Vec<Candidate> {
         }
 
         let size = dir_size(&path);
-        found.push(Candidate {
-            path: path.clone(),
-            size,
-            label: label_for(&root, &path, size),
-            category: Category::Caches,
-            selected_by_default: false,
-        });
+        found.push(Candidate::new(&root, path, size, Category::Caches, false));
         spinner.set_message(format!("{} found", found.len()));
     }
 
     found
-}
-
-fn find_targets(root: &Path, spinner: &ProgressBar) -> Vec<Candidate> {
-    scan_here(root, spinner)
 }
 
 fn trash_command_error(program: &str, output: std::process::Output, fallback: &str) -> io::Error {
@@ -373,21 +382,224 @@ fn move_to_trash(path: &Path) -> io::Result<()> {
     }
 }
 
-fn permanently_delete(path: &Path) -> io::Result<()> {
-    if path.is_dir() {
-        fs::remove_dir_all(path)
-    } else {
-        fs::remove_file(path)
-    }
+fn canonical_or_original(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
-fn confirm_permanent_delete(path: &Path, error: &io::Error) -> io::Result<bool> {
-    eprintln!("✗ {}: {}", path.display(), error);
-    Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("Move to Trash failed. Permanently delete this item instead?")
+fn is_protected_path(path: &Path) -> bool {
+    let path = canonical_or_original(path);
+
+    if path == Path::new("/") {
+        return true;
+    }
+
+    if path
+        .file_name()
+        .is_some_and(|name| [".git", ".ssh", ".gnupg"].contains(&name.to_string_lossy().as_ref()))
+    {
+        return true;
+    }
+
+    if let Some(home) = home_dir() {
+        let home = canonical_or_original(&home);
+        let protected = [
+            home.clone(),
+            home.join("Desktop"),
+            home.join("Documents"),
+            home.join("Downloads"),
+            home.join("Library"),
+            home.join("Library").join("Caches"),
+            home.join(".ssh"),
+            home.join(".gnupg"),
+        ];
+
+        if protected.iter().any(|p| path == canonical_or_original(p)) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn safe_to_trash(path: &Path, scope_root: &Path) -> Result<PathBuf, String> {
+    if !path.exists() {
+        return Err("path no longer exists".to_string());
+    }
+
+    let path = path
+        .canonicalize()
+        .map_err(|error| format!("could not canonicalize path: {error}"))?;
+    let scope_root = scope_root
+        .canonicalize()
+        .map_err(|error| format!("could not canonicalize scan root: {error}"))?;
+
+    if path == scope_root || !path.starts_with(&scope_root) {
+        return Err(format!(
+            "path is outside scan root {}",
+            scope_root.display()
+        ));
+    }
+
+    if is_protected_path(&path) {
+        return Err("protected path".to_string());
+    }
+
+    Ok(path)
+}
+
+fn review_and_clean(
+    root: &Path,
+    mut candidates: Vec<Candidate>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.size));
+
+    if candidates.is_empty() {
+        println!("Nothing to clean.");
+        return Ok(());
+    }
+
+    let total: u64 = candidates.iter().map(|candidate| candidate.size).sum();
+    println!(
+        "Found {} item(s) in {}, {} total.\n",
+        candidates.len(),
+        root.display(),
+        human(total).trim()
+    );
+
+    let items: Vec<String> = candidates
+        .iter()
+        .map(|candidate| candidate.label.clone())
+        .collect();
+    let defaults: Vec<bool> = candidates
+        .iter()
+        .map(|candidate| candidate.selected_by_default)
+        .collect();
+
+    let selected = MultiSelect::with_theme(&ColorfulTheme::default())
+        .with_prompt("Space to toggle, Enter to confirm")
+        .items(&items)
+        .defaults(&defaults)
+        .interact()?;
+
+    if selected.is_empty() {
+        println!("Nothing selected.");
+        return Ok(());
+    }
+
+    let freed: u64 = selected.iter().map(|&i| candidates[i].size).sum();
+    let confirmed = Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt(format!(
+            "Move {} item(s) to Trash, freeing {}?",
+            selected.len(),
+            human(freed).trim()
+        ))
         .default(false)
-        .interact()
-        .map_err(io::Error::other)
+        .interact()?;
+
+    if !confirmed {
+        println!("Aborted.");
+        return Ok(());
+    }
+
+    let mut trashed = 0;
+    let mut failed = 0;
+    let mut cleaned = 0;
+
+    for &i in &selected {
+        let item = &candidates[i];
+        let _category = item.category;
+        let _risk = item.risk;
+
+        let path = match safe_to_trash(&item.path, root) {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!("✗ {}: {}", item.path.display(), error);
+                failed += 1;
+                continue;
+            }
+        };
+
+        match move_to_trash(&path) {
+            Ok(_) => {
+                println!("✓ trashed {}", path.display());
+                trashed += 1;
+                cleaned += item.size;
+            }
+            Err(error) => {
+                eprintln!("✗ {}: {}", path.display(), error);
+                failed += 1;
+            }
+        }
+    }
+
+    println!(
+        "\nDone. Trashed {}, skipped {}. Cleaned ~{}.",
+        trashed,
+        failed,
+        human(cleaned).trim()
+    );
+    Ok(())
+}
+
+fn spinner() -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} Scanning… {msg}")
+            .unwrap(),
+    );
+    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+    spinner
+}
+
+fn require_directory(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if !root.exists() {
+        return Err(format!("{} does not exist.", root.display()).into());
+    }
+
+    if !root.is_dir() {
+        return Err(format!("{} is not a directory.", root.display()).into());
+    }
+
+    Ok(())
+}
+
+fn scan_with_spinner(scan: impl FnOnce(&ProgressBar) -> Vec<Candidate>) -> Vec<Candidate> {
+    let spinner = spinner();
+    let candidates = scan(&spinner);
+    spinner.finish_and_clear();
+    candidates
+}
+
+fn clean_here(root: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    require_directory(&root)?;
+
+    let root = root.canonicalize()?;
+    let candidates = scan_with_spinner(|spinner| scan_here(&root, spinner));
+
+    review_and_clean(&root, candidates)
+}
+
+fn clean_downloads() -> Result<(), Box<dyn std::error::Error>> {
+    let root = downloads_dir().ok_or("Could not find your home directory.")?;
+    if !root.exists() {
+        return Err(format!("{} does not exist.", root.display()).into());
+    }
+
+    let candidates = scan_with_spinner(scan_downloads);
+
+    review_and_clean(&root.canonicalize()?, candidates)
+}
+
+fn clean_caches() -> Result<(), Box<dyn std::error::Error>> {
+    let root = caches_dir().ok_or("Could not find your home directory.")?;
+    if !root.exists() {
+        return Err(format!("{} does not exist.", root.display()).into());
+    }
+
+    let candidates = scan_with_spinner(scan_caches);
+
+    review_and_clean(&root.canonicalize()?, candidates)
 }
 
 fn update_self() -> Result<(), Box<dyn std::error::Error>> {
@@ -410,117 +622,52 @@ fn update_self() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
+fn run_menu() -> Result<(), Box<dyn std::error::Error>> {
+    let items = [
+        "This directory",
+        "Choose another directory",
+        "Downloads / installers",
+        "Caches",
+        "Update broom",
+        "Quit",
+    ];
 
-    if args.get(1).is_some_and(|arg| arg == "update") {
-        return update_self();
-    }
-
-    let root = args
-        .get(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| env::current_dir().unwrap());
-    let root = root.canonicalize().unwrap_or(root);
-
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.cyan} Scanning… {msg}")
-            .unwrap(),
-    );
-    spinner.enable_steady_tick(std::time::Duration::from_millis(80));
-
-    let mut found = find_targets(&root, &spinner);
-    spinner.finish_and_clear();
-
-    found.sort_by_key(|f| std::cmp::Reverse(f.size));
-
-    if found.is_empty() {
-        println!("Nothing to clean.");
-        return Ok(());
-    }
-
-    let total: u64 = found.iter().map(|f| f.size).sum();
-    println!(
-        "Found {} folder(s), {} total.\n",
-        found.len(),
-        human(total).trim()
-    );
-
-    let items: Vec<String> = found
-        .iter()
-        .map(|f| {
-            let rel = f.path.strip_prefix(&root).unwrap_or(&f.path);
-            format!("{}  {}", human(f.size), rel.display())
-        })
-        .collect();
-
-    let selected = MultiSelect::with_theme(&ColorfulTheme::default())
-        .with_prompt("Space to toggle, Enter to confirm")
+    let choice = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("What do you want to clean?")
         .items(&items)
+        .default(0)
         .interact()?;
 
-    if selected.is_empty() {
-        println!("Nothing selected.");
-        return Ok(());
-    }
-
-    let freed: u64 = selected.iter().map(|&i| found[i].size).sum();
-    print!(
-        "\nMove {} folder(s) to Trash, freeing {}? [y/N] ",
-        selected.len(),
-        human(freed).trim()
-    );
-    io::stdout().flush()?;
-    let mut confirm = String::new();
-    io::stdin().read_line(&mut confirm)?;
-    if !confirm.trim().eq_ignore_ascii_case("y") {
-        println!("Aborted.");
-        return Ok(());
-    }
-
-    let mut trashed = 0;
-    let mut deleted = 0;
-    let mut failed = 0;
-    let mut cleaned = 0;
-
-    for &i in &selected {
-        let item = &found[i];
-        let path = &item.path;
-        match move_to_trash(path) {
-            Ok(_) => {
-                println!("✓ trashed {}", path.display());
-                trashed += 1;
-                cleaned += item.size;
-            }
-            Err(error) => {
-                if confirm_permanent_delete(path, &error)? {
-                    match permanently_delete(path) {
-                        Ok(_) => {
-                            println!("✓ permanently deleted {}", path.display());
-                            deleted += 1;
-                            cleaned += item.size;
-                        }
-                        Err(delete_error) => {
-                            eprintln!("✗ {}: {}", path.display(), delete_error);
-                            failed += 1;
-                        }
-                    }
-                } else {
-                    println!("Skipped {}", path.display());
-                    failed += 1;
-                }
-            }
+    match choice {
+        0 => clean_here(env::current_dir()?),
+        1 => {
+            let input: String = Input::with_theme(&ColorfulTheme::default())
+                .with_prompt("Directory to clean")
+                .interact_text()?;
+            clean_here(expand_tilde(input.trim()))
         }
+        2 => clean_downloads(),
+        3 => clean_caches(),
+        4 => update_self(),
+        _ => Ok(()),
     }
+}
 
-    println!(
-        "\nDone. Trashed {}, permanently deleted {}, skipped {}. Cleaned ~{}.",
-        trashed,
-        deleted,
-        failed,
-        human(cleaned).trim()
-    );
-    Ok(())
+fn route_arg(arg: &str) -> Result<(), Box<dyn std::error::Error>> {
+    match arg {
+        "update" => update_self(),
+        "here" | "." => clean_here(env::current_dir()?),
+        "downloads" | "installers" => clean_downloads(),
+        "caches" => clean_caches(),
+        path => clean_here(expand_tilde(path)),
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut args = env::args().skip(1);
+
+    match args.next() {
+        Some(arg) => route_arg(&arg),
+        None => run_menu(),
+    }
 }

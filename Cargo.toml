@@ -1,6 +1,6 @@
 [package]
 name = "broom-cli"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Scan a directory tree, find build/cache folders, and move the ones you pick to Trash."
 license = "MIT"

@@ -1,6 +1,6 @@
 # broom
 
-A fast CLI tool that scans a directory tree for common build and cache folders, shows them sorted by size, and lets you pick which ones to move to Trash.
+A fast CLI for finding common build and cache folders, sorting them by size, and moving the ones you choose to Trash.
 
 ```
 ⠸ Scanning… 12 found
@@ -16,7 +16,7 @@ Found 31 folder(s), 40.2 GB total.
 
 ## Install
 
-**From crates.io (requires [Rust](https://rustup.rs)):**
+Install from crates.io with [Rust](https://rustup.rs):
 
 ```bash
 cargo install broom-cli
@@ -24,13 +24,13 @@ cargo install broom-cli
 
 This installs the `broom` command.
 
-**From source:**
+Install from source:
 
 ```bash
 cargo install --git https://github.com/jaytuduri/broom-cli
 ```
 
-**Or clone and install locally:**
+Or clone and install locally:
 
 ```bash
 git clone https://github.com/jaytuduri/broom-cli
@@ -38,7 +38,7 @@ cd broom-cli
 cargo install --path .
 ```
 
-**Pre-built binaries** are available on the [Releases](https://github.com/jaytuduri/broom-cli/releases) page for macOS (Apple Silicon + Intel), Linux, and Windows.
+Pre-built binaries for macOS (Apple Silicon and Intel), Linux, and Windows are available on the [Releases](https://github.com/jaytuduri/broom-cli/releases) page.
 
 ## Usage
 
@@ -48,9 +48,9 @@ broom ~/projects       # scan a specific path
 broom update           # fetch and install the latest release
 ```
 
-Use `Space` to toggle folders, `Enter` to confirm the selection. You'll get one final confirmation before anything is moved to Trash.
+Use `Space` to toggle folders and `Enter` to confirm your selection. broom asks for one final confirmation before moving anything to Trash.
 
-broom first tries to move selected folders to the normal Trash/Recycle Bin instead of permanently deleting them. On Linux, it uses `gio trash` or `trash-put` when available; on macOS it asks Finder; on Windows it uses PowerShell to send items to the Recycle Bin. If moving an item to Trash fails, broom asks before permanently deleting that item.
+broom moves selected items to the normal Trash or Recycle Bin instead of deleting them permanently. On Linux, it uses `gio trash` or `trash-put` when available. On macOS, it asks Finder. On Windows, it uses PowerShell to send items to the Recycle Bin. If moving an item to Trash fails, broom reports the failure and leaves the item in place.
 
 ## What it finds
 
@@ -61,17 +61,17 @@ broom first tries to move selected folders to the normal Trash/Recycle Bin inste
 | `.next` | Next.js |
 | `.nuxt` | Nuxt |
 | `.svelte-kit` | SvelteKit |
-| `dist`, `build`, `out` | Various (only when a project marker exists nearby) |
+| `dist`, `build`, `out` | Various, only when a project marker exists nearby |
 | `.turbo`, `.vite`, `.parcel-cache` | Build tools |
 | `.gradle` | Java / Kotlin |
 | `__pycache__`, `.venv`, `venv` | Python |
 | `DerivedData` | Xcode |
 
-Generic names like `dist`, `build`, and `out` are only matched when a project marker file (`package.json`, `Cargo.toml`, `go.mod`, etc.) exists in the same directory, to avoid false positives.
+To avoid false positives, generic names like `dist`, `build`, and `out` are only matched when a project marker file (`package.json`, `Cargo.toml`, `go.mod`, etc.) exists in the same directory.
 
-## Customize
+## Customization
 
-Two constants at the top of `src/main.rs`:
+Adjust these constants at the top of `src/main.rs`:
 
 - **`TARGETS`** — folder names to find and measure
 - **`SKIP`** — folder names to never walk into (e.g. `.git`)
